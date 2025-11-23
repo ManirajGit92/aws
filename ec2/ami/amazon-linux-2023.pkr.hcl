@@ -1,69 +1,106 @@
-// Define Packer settings for AWS Plugin
 packer {
   required_plugins {
     amazon = {
-      version = ">= 1.0.0"
-      source  = "github.com/hashicorp/amazon"
+      version = "1.7.0"
+      source = "github.com/hashicorp/amazon"
     }
   }
 }
-
-// Define Packer variables for AWS
+ 
 variable "region" {
-  type        = string
-  description = "AWS region."
+  type = string
+  description = "Region."
 }
-
-variable "instance_type" {
-  type        = string
-  description = "EC2 instance type used for building the AMI."
+variable "vpc_net_id" {
+  type = string
+  description = "VPC network identifier."
 }
-
-variable "ssh_username" {
-  type        = string
-  description = "SSH username."
+variable "vpc_sn_id" {
+  type = string
+  description = "VPC subnet identifier."
 }
-
+variable "vpc_sg_id" {
+  type = string
+  description = "VPC security group identifier."
+}
+variable "ec2_source_ami_id" {
+  type = string
+  description = "EC2 source AMI identifier."
+}
+variable "ec2_key_pair_name" {
+  type = string
+  description = "EC2 key pair name."
+}
+variable "kms_key_id" {
+  type = string
+  description = "KMS key identifier."
+}
 variable "ssh_private_key_path" {
-  type        = string
+  type = string
   description = "SSH private key path."
 }
-
-// Use source Amazon EBS to create a new custom AMI
-source "amazon-ebs" "alma_linux_9_vm" {
-  region                  = var.region
-  instance_type           = var.instance_type
-  ssh_username            = var.ssh_username
-  ssh_private_key_file    = var.ssh_private_key_path
-
-  ami_name                = "sloopstash-alma-linux-9-v1.1.1-ami"
-  ami_description         = "AlmaLinux 9 custom AMI built with Packer"
+ 
+source "amazon-ebs" "ec2_amazon_linux_2023_inst" {
+  ami_name = "sloopstash-amazon-linux-2023-v1.1.1-ami"
+  region = var.region
+  vpc_id = var.vpc_net_id
+  subnet_id = var.vpc_sn_id
+  security_group_id = var.vpc_sg_id
+  source_ami = var.ec2_source_ami_id
+  instance_type = "t3.micro"
   associate_public_ip_address = true
-
-  // AlmaLinux 9 AMI filter from AWS Marketplace/Community
-  source_ami_filter {
-    filters = {
-      name                = "almalinux-9*"
-      root-device-type    = "ebs"
-      virtualization-type = "hvm"
-    }
-    owners      = ["679593333241"] // AlmaLinux official owner
-    most_recent = true
+  ami_virtualization_type = "hvm"
+  force_deregister = true
+  force_delete_snapshot = true
+  encrypt_boot = true
+  kms_key_id = var.kms_key_id
+  skip_save_build_region = false
+  skip_metadata_api_check = false
+  skip_credential_validation = false
+  aws_polling {
+    max_attempts = 40
+    delay_seconds = 15
   }
-
-  ssh_interface = "public_ip"
-
+  disable_stop_instance = false
+  ebs_optimized = false
+  enable_t2_unlimited = false
+  skip_profile_validation = false
+  shutdown_behavior = "terminate"
+  tenancy = "default"
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens = "optional"
+    http_put_response_hop_limit = 1
+  }
+  communicator = "ssh"
+  ssh_interface = "public_dns"
+  ssh_port = 22
+  ssh_username = "ec2-user"
+  ssh_keypair_name = var.ec2_key_pair_name
+  ssh_private_key_file = var.ssh_private_key_path
+  ssh_timeout = "1m"
   tags = {
-    Name          = "sloopstash-alma-linux-9-v1.1.1-ami"
-    Organization  = "sloopstash"
-    Region        = var.region
+    Name = "sloopstash-amazon-linux-2023-v1.1.1-ami"
+    Region = var.region
+    Organization = "sloopstash"
   }
 }
-
-// Provisioning essential system packages and tools
+ 
 build {
-  name    = "alma_linux_9_image"
-  sources = ["source.amazon-ebs.alma_linux_9_vm"]
-
+  name = "ec2_amazon_linux_2023_ami"
+  sources = ["source.amazon-ebs.ec2_amazon_linux_2023_inst"]
   provisioner "shell" {
-    inline_shebang = "/bin/bash_
+    only = ["amazon-ebs.ec2_amazon_linux_2023_inst"]
+    inline_shebang = "/bin/bash -e"
+    inline = [
+      "sudo dnf update -y",
+      "sudo dnf install -y wget vim net-tools gcc make tar git unzip sysstat tree initscripts bind-utils nc nmap logrotate crontabs",
+      "sudo dnf install -y python-devel python-pip python-setuptools",
+      "sudo dnf clean all",
+      "sudo rm -rf /var/cache/dnf",
+      "sudo python3 -m pip install supervisor",
+      "sudo mkdir /etc/supervisord.d",
+      "history -c"
+    ]
+  }
+}
